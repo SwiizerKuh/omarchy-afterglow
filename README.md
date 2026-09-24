@@ -1,16 +1,40 @@
-# Trajectory Plot
+# Afterglow
 
 A live, cassette-futurist trajectory plot for the Omarchy desktop.
 
-![Trajectory Plot](preview.png)
+![Afterglow](preview.png)
+
+## The future we were promised
+
+Before screens were sheets of glass, the future was drawn in phosphor. The
+crew of the *Nostromo* in *Alien* read their fate off flickering monitors and
+green text. In *Blade Runner*, Deckard's Esper machine inches into a
+photograph one grudging, whirring step at a time. In *Andor*, the Empire
+tracks rebels across chunky, clattering consoles you could picture repairing
+with a screwdriver. They were props, but they promised a certain kind of
+future: machines that felt *built*, where every readout had a job and every
+switch had travel.
+
+That future never quite arrived. Our interfaces became flat, frictionless and
+endlessly scrollable. They're better in nearly every way we can measure, and
+colder in a way that's harder to.
+
+Afterglow brings a little of that other future to your desktop. It keeps the
+CRT's imperfections on purpose: the bend of the glass, the lines of the
+raster, light bleeding softly around anything bright, colour fringing at the
+edges. None of it is a flaw to correct. It's the warmth, proof that the light
+came from somewhere. The name is the phenomenon itself: the glow a phosphor
+keeps giving off after the beam has moved on.
+
+## What it does
 
 Spacecraft cross a plotting grid, leaving dotted trails that hold and then
-fade before the next heading comes in. Around them sits an instrument HUD
-in the style of late-70s and early-80s sci-fi screens: an orbital plot, a
-radar scope with a stepped sweep, station markers, a debris point cloud, tick
-rulers, telemetry readouts, and callouts that flag the occasional contact
-with a blinking `WARNING` or a `TARGET LOCK`. The whole thing is bent through
-a CRT shader with curvature, scanlines, phosphor glow and edge fringing.
+fade before the next heading comes in. Around them sits an instrument HUD:
+an orbital plot, a radar scope with a stepped sweep, station markers, a debris
+point cloud, tick rulers, telemetry readouts, and callouts that flag the
+occasional contact with a blinking `WARNING` or a `TARGET LOCK`. The whole
+thing is bent through a CRT shader with curvature, scanlines, phosphor glow
+and edge fringing.
 
 It **follows your Omarchy theme.** Every colour comes from the active
 theme's palette and updates live when you run `omarchy theme set`. It works
@@ -19,7 +43,7 @@ on dark and light themes alike.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/SwiizerKuh/omarchy-trajectory-plot.git --enable
+omarchy plugin add https://github.com/SwiizerKuh/omarchy-afterglow.git --enable
 ```
 
 It appears on every monitor straight away.
@@ -32,34 +56,34 @@ in a floating terminal, styled to your theme:
 
 ![Setup](docs/setup.png)
 
-1. **Customize the Trajectory Plot?** Choose *Not now* to keep the defaults.
+1. **Customize Afterglow?** Choose *Not now* to keep the defaults.
 2. **CRT effects:** on (curvature, scanlines, phosphor glow) or off.
 3. **Visuals:** *Full*, or *Minimal* without the radar scope.
 4. **Save?** Nothing is written until you confirm.
 
-Your answers are merged into `~/.config/omarchy/trajectory-plot.json`. Only
+Your answers are merged into `~/.config/omarchy/afterglow.json`. Only
 the keys it asked about (`crt.enabled`, `hud.scope`) are set; anything else
 in the file is kept. The setup is offered once, and never if you already have
 a config file. Run it again any time:
 
 ```sh
-omarchy-shell io.github.swiizerkuh.trajectory-plot setup
+omarchy-shell io.github.swiizerkuh.afterglow setup
 ```
 
 ## Remove
 
 ```sh
-omarchy plugin remove io.github.swiizerkuh.trajectory-plot
+omarchy plugin remove io.github.swiizerkuh.afterglow
 ```
 
 The plugin only writes to your configuration when you choose *Save* in the
-setup. To remove every trace, also delete `~/.config/omarchy/trajectory-plot.json`
-(if you saved settings) and `~/.local/state/trajectory-plot/` (a one-line
+setup. To remove every trace, also delete `~/.config/omarchy/afterglow.json`
+(if you saved settings) and `~/.local/state/afterglow/` (a one-line
 marker recording that the setup was offered).
 
 ## How it sits on your desktop
 
-Trajectory Plot does **not** replace Omarchy's background plugin. It draws on
+Afterglow does **not** replace Omarchy's background plugin. It draws on
 its own layer between your wallpaper and your windows:
 
 - your wallpaper, wallpaper cycling, transitions and the desktop's
@@ -87,8 +111,8 @@ by key:
 | Layer | File | Who it's for |
 |---|---|---|
 | 1 | `defaults.json` in this plugin | the reference for every key |
-| 2 | `trajectory-plot.json` in the **active theme** | theme authors |
-| 3 | `~/.config/omarchy/trajectory-plot.json` | you |
+| 2 | `afterglow.json` in the **active theme** | theme authors |
+| 3 | `~/.config/omarchy/afterglow.json` | you |
 
 You only need to include the keys you want to change. Your file and the
 theme's file are watched, so edits apply straight away.
@@ -170,7 +194,7 @@ Every element can be switched on or off: `frame`, `rulers`, `scale`,
 
 ## For theme authors
 
-Ship a `trajectory-plot.json` in your theme directory to style the plot for
+Ship a `afterglow.json` in your theme directory to style the plot for
 your theme. It is picked up when your theme is applied and dropped when the
 user switches away. See [`examples/cassette-futurism.json`](examples/cassette-futurism.json)
 for a complete example: a black-and-white theme with orange and burgundy
@@ -204,7 +228,7 @@ the GPU.
 ## Updating
 
 ```sh
-omarchy plugin update io.github.swiizerkuh.trajectory-plot
+omarchy plugin update io.github.swiizerkuh.afterglow
 omarchy restart shell
 ```
 

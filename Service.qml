@@ -1,4 +1,4 @@
-// Trajectory Plot -- a live, CRT-styled trajectory plot for the Omarchy
+// Afterglow -- a live, CRT-styled trajectory plot for the Omarchy
 // desktop: a grid, spacecraft trails that cross it and fade, and a
 // retro-futurist instrument HUD, all bent through a CRT shader.
 //
@@ -12,8 +12,8 @@
 //
 // Configuration is layered, later files winning key by key:
 //   1. defaults.json                                    (this plugin)
-//   2. ~/.local/state/omarchy/current/theme/trajectory-plot.json  (the theme)
-//   3. ~/.config/omarchy/trajectory-plot.json           (you)
+//   2. ~/.local/state/omarchy/current/theme/afterglow.json  (the theme)
+//   3. ~/.config/omarchy/afterglow.json           (you)
 
 pragma ComponentBehavior: Bound
 
@@ -33,8 +33,8 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string defaultsPath: Qt.resolvedUrl("defaults.json").toString().replace(/^file:\/\//, "")
-  readonly property string themeConfigPath: home + "/.local/state/omarchy/current/theme/trajectory-plot.json"
-  readonly property string userConfigPath: home + "/.config/omarchy/trajectory-plot.json"
+  readonly property string themeConfigPath: home + "/.local/state/omarchy/current/theme/afterglow.json"
+  readonly property string userConfigPath: home + "/.config/omarchy/afterglow.json"
 
   property var defaultsCfg: ({})
   property var themeCfg: ({})
@@ -47,7 +47,7 @@ Item {
       var v = JSON.parse(text)
       return (v && typeof v === "object" && !Array.isArray(v)) ? v : ({})
     } catch (e) {
-      console.warn("trajectory-plot: ignoring invalid JSON: " + e)
+      console.warn("afterglow: ignoring invalid JSON: " + e)
       return ({})
     }
   }
@@ -127,16 +127,16 @@ Item {
   // and never when the user already has a config file. It only writes after
   // an explicit "Save". Re-run any time with:
   //
-  //   omarchy-shell io.github.swiizerkuh.trajectory-plot setup
+  //   omarchy-shell io.github.swiizerkuh.afterglow setup
   readonly property string setupScript: Qt.resolvedUrl("bin/setup").toString().replace(/^file:\/\//, "")
   readonly property string setupMarker: (Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state"))
-    + "/trajectory-plot/setup-offered"
+    + "/afterglow/setup-offered"
 
   function launchSetup(onlyIfFirstRun) {
     var guard = onlyIfFirstRun ? '[[ -e "$1" || -e "$2" ]] && exit 0; ' : ''
     setupProc.command = ["bash", "-c",
       guard + 'exec omarchy-launch-floating-terminal-with-presentation "$3"',
-      "trajectory-plot-setup", root.setupMarker, root.userConfigPath, root.setupScript]
+      "afterglow-setup", root.setupMarker, root.userConfigPath, root.setupScript]
     if (!setupProc.running) setupProc.running = true
   }
 
@@ -151,7 +151,7 @@ Item {
   }
 
   IpcHandler {
-    target: "io.github.swiizerkuh.trajectory-plot"
+    target: "io.github.swiizerkuh.afterglow"
 
     function setup(): void {
       root.launchSetup(false)
@@ -1975,7 +1975,7 @@ Item {
       anchors { top: true; bottom: true; left: true; right: true }
 
       // Bottom layer: above the wallpaper (Background layer), below windows.
-      WlrLayershell.namespace: "trajectory-plot"
+      WlrLayershell.namespace: "afterglow"
       WlrLayershell.layer: WlrLayer.Bottom
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore

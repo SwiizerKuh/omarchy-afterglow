@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.swiizerkuh.trajectory-plot",
-  "name": "Trajectory Plot",
+  "id": "io.github.swiizerkuh.afterglow",
+  "name": "Afterglow",
   "version": "1.0.0",
   "author": "SwiizerKuh",
   "license": "MIT",

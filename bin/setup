@@ -1,20 +1,20 @@
 #!/bin/bash
-# Trajectory Plot setup.
+# Afterglow setup.
 #
 # Offered once, automatically, the first time the plugin loads (after
 # `omarchy plugin add ... --enable`), and on demand any time with:
 #
-#   omarchy-shell io.github.swiizerkuh.trajectory-plot setup
+#   omarchy-shell io.github.swiizerkuh.afterglow setup
 #
 # Asks a few questions, then MERGES the answers into
-# ~/.config/omarchy/trajectory-plot.json -- only the keys it asked about, and
+# ~/.config/omarchy/afterglow.json -- only the keys it asked about, and
 # only after an explicit "Save". Declining at any step writes nothing.
 
 set -euo pipefail
 
-CONFIG="${TRAJECTORY_PLOT_CONFIG:-$HOME/.config/omarchy/trajectory-plot.json}"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/trajectory-plot"
-RERUN="omarchy-shell io.github.swiizerkuh.trajectory-plot setup"
+CONFIG="${AFTERGLOW_CONFIG:-$HOME/.config/omarchy/afterglow.json}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/afterglow"
+RERUN="omarchy-shell io.github.swiizerkuh.afterglow setup"
 
 # Mark the setup as offered up front, so closing this window means "not now"
 # rather than "ask me again at every login".
@@ -29,12 +29,12 @@ not_now() {
 }
 
 echo
-gum style --bold "Trajectory Plot"
+gum style --bold "Afterglow"
 echo "A live trajectory plot now sits on your desktop, between your wallpaper"
 echo "and your windows. It follows your Omarchy theme."
 echo
 
-gum confirm "Customize the Trajectory Plot?" --affirmative "Customize" --negative "Not now" || not_now
+gum confirm "Customize Afterglow?" --affirmative "Customize" --negative "Not now" || not_now
 
 echo
 if gum confirm "CRT effects? Curvature, scanlines, phosphor glow." --affirmative "On" --negative "Off"; then
