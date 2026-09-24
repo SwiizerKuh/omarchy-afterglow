@@ -1,0 +1,87 @@
+#!/bin/bash
+# Trajectory Plot setup.
+#
+# Offered once, automatically, the first time the plugin loads (after
+# `omarchy plugin add ... --enable`), and on demand any time with:
+#
+#   omarchy-shell io.github.swiizerkuh.trajectory-plot setup
+#
+# Asks a few questions, then MERGES the answers into
+# ~/.config/omarchy/trajectory-plot.json -- only the keys it asked about, and
+# only after an explicit "Save". Declining at any step writes nothing.
+
+set -euo pipefail
+
+CONFIG="${TRAJECTORY_PLOT_CONFIG:-$HOME/.config/omarchy/trajectory-plot.json}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/trajectory-plot"
+RERUN="omarchy-shell io.github.swiizerkuh.trajectory-plot setup"
+
+# Mark the setup as offered up front, so closing this window means "not now"
+# rather than "ask me again at every login".
+mkdir -p "$STATE_DIR"
+touch "$STATE_DIR/setup-offered"
+
+not_now() {
+  echo
+  echo "Nothing changed. Run the setup again any time with:"
+  echo "  $RERUN"
+  exit 0
+}
+
+echo
+gum style --bold "Trajectory Plot"
+echo "A live trajectory plot now sits on your desktop, between your wallpaper"
+echo "and your windows. It follows your Omarchy theme."
+echo
+
+gum confirm "Customize the Trajectory Plot?" --affirmative "Customize" --negative "Not now" || not_now
+
+echo
+if gum confirm "CRT effects? Curvature, scanlines, phosphor glow." --affirmative "On" --negative "Off"; then
+  crt=true
+else
+  crt=false
+fi
+
+echo
+visuals=$(gum choose --header "Visuals" \
+  "Full: everything, including the radar scope" \
+  "Minimal: no radar scope") || not_now
+if [[ $visuals == Minimal* ]]; then
+  scope=false
+  visuals_label="Minimal"
+else
+  scope=true
+  visuals_label="Full"
+fi
+
+echo
+echo "  CRT effects   $([[ $crt == true ]] && echo on || echo off)"
+echo "  Visuals       $visuals_label"
+echo
+gum confirm "Save to ${CONFIG/#$HOME/\~}?" --affirmative "Save" --negative "Cancel" || not_now
+
+mkdir -p "$(dirname "$CONFIG")"
+tmp=$(mktemp "${CONFIG}.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+
+if [[ -s $CONFIG ]]; then
+  # Merge into the existing file; refuse to touch it if it doesn't parse.
+  if ! jq --argjson crt "$crt" --argjson scope "$scope" \
+      '.crt.enabled = $crt | .hud.scope = $scope' "$CONFIG" >"$tmp" 2>/dev/null; then
+    echo
+    echo "Couldn't read $CONFIG as JSON, so it was left alone."
+    echo "Fix or remove it, then run: $RERUN"
+    exit 1
+  fi
+else
+  jq -n --argjson crt "$crt" --argjson scope "$scope" \
+    '{crt: {enabled: $crt}, hud: {scope: $scope}}' >"$tmp"
+fi
+
+mv "$tmp" "$CONFIG"
+trap - EXIT
+
+echo
+echo "Saved. It applies straight away."
+echo "Change it later with: $RERUN"

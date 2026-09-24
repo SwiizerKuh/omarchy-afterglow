@@ -118,6 +118,46 @@ Item {
     }
   }
 
+  // ---- setup wizard -----------------------------------------------------------
+  //
+  // `omarchy plugin add` deliberately runs nothing from a plugin, so the setup
+  // is offered here instead: the first time the plugin loads, in a floating
+  // themed terminal, the same way Omarchy's own setup wizards appear. It is
+  // offered exactly once -- bin/setup marks it offered as soon as it opens --
+  // and never when the user already has a config file. It only writes after
+  // an explicit "Save". Re-run any time with:
+  //
+  //   omarchy-shell io.github.swiizerkuh.trajectory-plot setup
+  readonly property string setupScript: Qt.resolvedUrl("bin/setup").toString().replace(/^file:\/\//, "")
+  readonly property string setupMarker: (Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state"))
+    + "/trajectory-plot/setup-offered"
+
+  function launchSetup(onlyIfFirstRun) {
+    var guard = onlyIfFirstRun ? '[[ -e "$1" || -e "$2" ]] && exit 0; ' : ''
+    setupProc.command = ["bash", "-c",
+      guard + 'exec omarchy-launch-floating-terminal-with-presentation "$3"',
+      "trajectory-plot-setup", root.setupMarker, root.userConfigPath, root.setupScript]
+    if (!setupProc.running) setupProc.running = true
+  }
+
+  Process { id: setupProc }
+
+  // A short delay, so a first load at login doesn't race the rest of the
+  // session coming up.
+  Timer {
+    interval: 3000
+    running: true
+    onTriggered: root.launchSetup(true)
+  }
+
+  IpcHandler {
+    target: "io.github.swiizerkuh.trajectory-plot"
+
+    function setup(): void {
+      root.launchSetup(false)
+    }
+  }
+
   // ------------------------------------------------------------------- HUD
   //
   // Instrument chrome around the trajectory plot: a warped frame with corner

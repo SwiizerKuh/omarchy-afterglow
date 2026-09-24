@@ -24,15 +24,38 @@ omarchy plugin add https://github.com/SwiizerKuh/omarchy-trajectory-plot.git --e
 
 It appears on every monitor straight away.
 
+### Setup
+
+`omarchy plugin add` never runs code from a plugin, so the setup comes a
+moment later instead. The first time the plugin loads, a short setup opens
+in a floating terminal, styled to your theme:
+
+![Setup](docs/setup.png)
+
+1. **Customize the Trajectory Plot?** Choose *Not now* to keep the defaults.
+2. **CRT effects:** on (curvature, scanlines, phosphor glow) or off.
+3. **Visuals:** *Full*, or *Minimal* without the radar scope.
+4. **Save?** Nothing is written until you confirm.
+
+Your answers are merged into `~/.config/omarchy/trajectory-plot.json`. Only
+the keys it asked about (`crt.enabled`, `hud.scope`) are set; anything else
+in the file is kept. The setup is offered once, and never if you already have
+a config file. Run it again any time:
+
+```sh
+omarchy-shell io.github.swiizerkuh.trajectory-plot setup
+```
+
 ## Remove
 
 ```sh
 omarchy plugin remove io.github.swiizerkuh.trajectory-plot
 ```
 
-The plugin never writes to your configuration. If you created
-`~/.config/omarchy/trajectory-plot.json` yourself, delete it too if you
-want it gone.
+The plugin only writes to your configuration when you choose *Save* in the
+setup. To remove every trace, also delete `~/.config/omarchy/trajectory-plot.json`
+(if you saved settings) and `~/.local/state/trajectory-plot/` (a one-line
+marker recording that the setup was offered).
 
 ## How it sits on your desktop
 
@@ -51,7 +74,8 @@ behind the plot, so it stays legible over busy photo wallpapers. Set it to
 ## Requirements
 
 - Omarchy with the Quattro shell (the Quickshell-based `omarchy-shell`).
-- Nothing else. There are no external programs, services or privileges. The
+- `gum` and `jq` for the setup. Both ship with Omarchy.
+- Nothing else. There are no services, daemons or elevated privileges. The
   CRT shader ships precompiled as `crt.frag.qsb`, with its source in
   `crt.frag`.
 
