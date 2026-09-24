@@ -1509,8 +1509,16 @@ Item {
           property point p1: Qt.point(0, 0)
           property point p2: Qt.point(0, 0)
           property point p3: Qt.point(0, 0)
-          property string tintRole: "foreground"
-          readonly property color tint: fpl.resolve(trail.tintRole, "foreground")
+          // A trail remembers WHICH colour it is -- a palette slot, or its
+          // callout -- never the colour itself, and resolves it live. Storing
+          // the value would carry the old theme's colours into the new one
+          // for the rest of the flight.
+          property int paletteIndex: 0
+          readonly property color tint: trail.flag === "warning"
+            ? fpl.resolve(fpl.hudOpt("warningColor", "urgent"), "urgent")
+            : trail.flag === "target"
+              ? fpl.resolve(fpl.hudOpt("targetColor", "accent"), "accent")
+              : fpl.resolve(fpl.trailPalette[trail.paletteIndex % Math.max(1, fpl.trailPalette.length)], "foreground")
           property string tag: ""
           property int dots: 40
           property real progress: 0
@@ -1580,13 +1588,11 @@ Item {
             var pLock = fpl.showCallouts ? fpl.hudNum("targetChance", 0.14) : 0
             if (roll < pWarn) {
               trail.flag = "warning"
-              trail.tintRole = fpl.hudOpt("warningColor", "urgent")
             } else if (roll < pWarn + pLock) {
               trail.flag = "target"
-              trail.tintRole = fpl.hudOpt("targetColor", "accent")
             } else {
               trail.flag = ""
-              trail.tintRole = fpl.trailPalette[Math.floor(Math.random() * fpl.trailPalette.length)]
+              trail.paletteIndex = Math.floor(Math.random() * fpl.trailPalette.length)
             }
             trail.tag = fpl.callsign()
             trail.crossDuration = fpl.randRange("crossMin", 26000, "crossMax", 44000)
