@@ -1,6 +1,6 @@
 # Afterglow
 
-A live, cassette-futurist trajectory plot for the Omarchy desktop.
+A live, theme-aware cassette-futurist interface wallpaper for the Omarchy desktop. Inspired by the tactile user interfaces seen in nostalgic sci-fi media. Install, customize, and reminisce on the digital future we were promised but traded for emotionless rounded corners. 
 
 ![Afterglow](preview.png)
 
