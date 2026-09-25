@@ -2,7 +2,7 @@
 
 A live, theme-aware cassette-futurist interface wallpaper for the Omarchy desktop. Inspired by the tactile user interfaces seen in nostalgic sci-fi media. Install, customize, and reminisce on the digital future we were promised but traded for emotionless rounded corners. 
 
-![Afterglow](preview.png)
+![Afterglow](docs/afterglow.gif)
 
 ## The future we were promised
 
