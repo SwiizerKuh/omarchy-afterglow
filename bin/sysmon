@@ -1,0 +1,164 @@
+#!/bin/bash
+# Afterglow system monitor.
+#
+# Started once by the plugin and kept running; prints one JSON line per sample:
+#   {"ram":41.2,"ramUsed":6.4,"ramTotal":15.5,"gpu":12.0,"gpuSource":"fdinfo","gpuName":"i915 0000:00:02.0"}
+# gpu is -1 when no source is available.
+#
+# Reads /proc and /sys only. No network, no privileges, writes nothing.
+#
+# GPU sources, first that works wins:
+#   sysfs   /sys/class/drm/card*/device/gpu_busy_percent  (amdgpu)
+#   fdinfo  per-client engine busy time in /proc/<pid>/fdinfo, the same
+#           accounting nvtop uses (i915, xe, amdgpu, msm, panfrost, ...).
+#           Unprivileged, so it counts this user's processes -- on a desktop,
+#           the compositor and every app.
+#   nvidia  nvidia-smi, when the proprietary driver is in use.
+#
+# usage: sysmon [interval-ms]
+
+set -u
+# Bash builtins and integer maths throughout: on a timer that never stops,
+# forking date/awk several times a sample cost more than the sampling did.
+INTERVAL_MS=${1:-2000}
+[[ $INTERVAL_MS =~ ^[0-9]+$ ]] || INTERVAL_MS=2000
+(( INTERVAL_MS < 500 )) && INTERVAL_MS=500
+printf -v SLEEP '%d.%03d' $(( INTERVAL_MS / 1000 )) $(( INTERVAL_MS % 1000 ))
+PARENT=$PPID
+
+# Microseconds, from bash's own clock -- no fork.
+now_us() { local t=${EPOCHREALTIME/[.,]/}; NOW_US=$(( 10#$t )); }
+
+# n tenths -> "12.3"
+tenths() { printf -v "$1" '%d.%d' $(( $2 / 10 )) $(( $2 % 10 )); }
+
+# Sets RAM_JSON.
+ram_sample() {
+  local key val unit total=0 avail=0
+  while read -r key val unit; do
+    case $key in
+      MemTotal:) total=$val ;;
+      MemAvailable:) avail=$val ;;
+    esac
+  done < /proc/meminfo
+  if (( total <= 0 )); then RAM_JSON='"ram":-1'; return; fi
+  local used=$(( total - avail )) pct gused gtotal
+  tenths pct $(( used * 1000 / total ))
+  tenths gused $(( used * 10 / 1048576 ))
+  tenths gtotal $(( total * 10 / 1048576 ))
+  RAM_JSON="\"ram\":$pct,\"ramUsed\":$gused,\"ramTotal\":$gtotal"
+}
+
+# ---- GPU source detection -------------------------------------------------
+SYSFS_BUSY=""
+for f in /sys/class/drm/card*/device/gpu_busy_percent; do
+  [[ -r $f ]] && { SYSFS_BUSY=$f; break; }
+done
+
+GPU_NAME=""
+for d in /sys/class/drm/card*/device; do
+  [[ -e $d/driver ]] || continue
+  GPU_NAME="$(basename "$(readlink "$d/driver")") $(basename "$(readlink -f "$d")")"
+  break
+done
+
+HAVE_NVIDIA=0
+command -v nvidia-smi >/dev/null 2>&1 && HAVE_NVIDIA=1
+
+# fdinfo state: busy ns per "client:engine" from the previous sample.
+declare -A PREV=()
+DRM_FILES=()
+# Finding which processes hold the GPU walks every process's fd table, the
+# priciest step, so it is redone every SCAN_EVERY samples (~30s at the
+# default interval). Clients already found are sampled every time.
+SCAN_EVERY=15
+SAMPLE=0
+LAST_US=0
+
+scan_drm_fds() {
+  DRM_FILES=()
+  local link
+  while IFS= read -r link; do
+    DRM_FILES+=("${link/\/fd\//\/fdinfo\/}")
+  done < <(find /proc/[0-9]*/fd -maxdepth 1 -lname '/dev/dri/*' 2>/dev/null)
+}
+
+# Sets GPU_PCT. Must run in the main shell, never inside $( ... ): the
+# previous sample's counters live in PREV/LAST_US, and a subshell would throw
+# them away, leaving every sample without a baseline.
+gpu_fdinfo() {
+  GPU_PCT=-1
+  (( SAMPLE % SCAN_EVERY == 0 )) && scan_drm_fds
+  (( ${#DRM_FILES[@]} == 0 )) && return
+
+  now_us; local t=$NOW_US
+  local -A cur=() cap=()
+  local key val
+  # One line per client:engine busy counter (deduplicated: a DRM client can
+  # be shared by several fds/processes), plus engine capacities.
+  while read -r key val; do
+    if [[ $key == cap:* ]]; then cap[${key#cap:}]=$val; else cur[$key]=$val; fi
+  done < <(awk '
+    FNR == 1 { cid = "" }
+    /^drm-client-id:/ { cid = $2 }
+    /^drm-engine-capacity-/ { e = $1; sub(/^drm-engine-capacity-/, "", e); sub(/:$/, "", e); print "cap:" e, $2; next }
+    /^drm-engine-/ && cid != "" {
+      e = $1; sub(/^drm-engine-/, "", e); sub(/:$/, "", e)
+      k = cid ":" e
+      if (!(k in seen)) { seen[k] = 1; print k, $2 }
+    }' "${DRM_FILES[@]}" 2>/dev/null)
+
+  local pct=-1
+  if (( LAST_US > 0 )); then
+    local dt=$(( t - LAST_US ))   # microseconds; busy counters are ns
+    local -A delta=()
+    for key in "${!cur[@]}"; do
+      [[ -n ${PREV[$key]:-} ]] || continue
+      local d=$(( cur[$key] - PREV[$key] ))
+      (( d > 0 )) || continue
+      local eng=${key#*:}
+      delta[$eng]=$(( ${delta[$eng]:-0} + d ))
+    done
+    pct=0
+    for eng in "${!delta[@]}"; do
+      local c=${cap[$eng]:-1}
+      local p=$(( delta[$eng] / (dt * c) ))   # ns / (us * 1000) * 1000 = tenths of a percent
+      (( p > pct )) && pct=$p
+    done
+    (( pct > 1000 )) && pct=1000
+    tenths pct "$pct"
+  fi
+  PREV=()
+  for key in "${!cur[@]}"; do PREV[$key]=${cur[$key]}; done
+  LAST_US=$t
+  GPU_PCT=$pct
+}
+
+# Sets GPU_JSON. Same rule: call it directly, not in a subshell.
+gpu_sample() {
+  local pct=-1 src="none"
+  if [[ -n $SYSFS_BUSY ]]; then
+    pct=$(<"$SYSFS_BUSY"); src="sysfs"
+  elif [[ -d /proc/self/fdinfo ]] && [[ -n $GPU_NAME ]] && [[ $GPU_NAME != nvidia* ]]; then
+    gpu_fdinfo; pct=$GPU_PCT; src="fdinfo"
+  elif (( HAVE_NVIDIA )); then
+    pct=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [[ $pct =~ ^[0-9]+$ ]] || pct=-1
+    src="nvidia"
+  fi
+  printf -v GPU_JSON '"gpu":%s,"gpuSource":"%s","gpuName":"%s"' "${pct:--1}" "$src" "$GPU_NAME"
+}
+
+# A pipe nothing ever writes to: `read -t` on it is a sleep without forking
+# /usr/bin/sleep every sample.
+exec {TICK}<> <(:)
+
+while :; do
+  # Stop if the shell that started us has gone.
+  kill -0 "$PARENT" 2>/dev/null || exit 0
+  ram_sample
+  gpu_sample
+  printf '{%s,%s}\n' "$RAM_JSON" "$GPU_JSON" || exit 0
+  SAMPLE=$(( SAMPLE + 1 ))
+  read -r -t "$SLEEP" -u "$TICK" _ || true
+done

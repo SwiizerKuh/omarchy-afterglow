@@ -30,8 +30,8 @@ keeps giving off after the beam has moved on.
 
 Spacecraft cross a plotting grid, leaving dotted trails that hold and then
 fade before the next heading comes in. Around them sits an instrument HUD:
-an orbital plot, a radar scope with a stepped sweep, station markers, a debris
-point cloud, tick rulers, telemetry readouts, and callouts that flag the
+an orbital plot, a radar scope with a stepped sweep, live RAM and GPU meters,
+station markers, a debris point cloud, tick rulers, telemetry readouts, and callouts that flag the
 occasional contact with a blinking `WARNING` or a `TARGET LOCK`. The whole
 thing is bent through a CRT shader with curvature, scanlines, phosphor glow
 and edge fringing.
@@ -99,7 +99,8 @@ behind the plot, so it stays legible over busy photo wallpapers. Set it to
 
 - Omarchy with the Quattro shell (the Quickshell-based `omarchy-shell`).
 - `gum` and `jq` for the setup. Both ship with Omarchy.
-- Nothing else. There are no services, daemons or elevated privileges. The
+- Nothing else. No system services and no elevated privileges; the meters run
+  one small helper script (`bin/sysmon`) for the length of the session. The
   CRT shader ships precompiled as `crt.frag.qsb`, with its source in
   `crt.frag`.
 
@@ -191,6 +192,44 @@ Every element can be switched on or off: `frame`, `rulers`, `scale`,
 | `text.tracking`, `text.identTitle`, `text.identName`, `text.identCode` | | Header text. |
 
 `defaults.json` lists every key with its default.
+
+### System meters
+
+Two live meters sit at the top left of the frame: **memory allocation** and
+**graphics processor load**. Each is a heavy-outlined bar with a hatched fill,
+the percentage beside it, and a readout underneath (memory used and total, or
+the GPU driver and device).
+
+The fill is a row of blocks. When a reading changes, the leading block fades
+from transparent to opaque before the next one starts, so the bar crawls to
+its new value. Once it settles, the last block re-fills on every new sample.
+Above `sysmonWarnAt` a meter switches to the theme's `urgent` colour.
+
+Readings come from `bin/sysmon`, a small bash script started once per session
+(not once per monitor). It only reads `/proc` and `/sys`, writes nothing, and
+uses about 1% of one CPU core at the default 2-second interval.
+
+- **RAM:** `MemTotal` and `MemAvailable` from `/proc/meminfo`.
+- **GPU:** the first source that works:
+  - `gpu_busy_percent` in sysfs (AMD);
+  - the kernel's per-client GPU accounting in `/proc/<pid>/fdinfo`, the same
+    data `nvtop` uses (Intel, AMD and other open drivers). It needs no
+    privileges, so it counts your own user's processes, which on a desktop
+    means the compositor and every app;
+  - `nvidia-smi`, for the proprietary NVIDIA driver.
+
+  With none of these available, the meter reads `--%` and `NO GPU TELEMETRY`.
+  Verified on Intel Iris Xe (i915) against the GPU's own RC6 idle counters.
+  The AMD and NVIDIA paths follow those drivers' documented interfaces but
+  have not been tested on that hardware.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `hud.sysmon` | `true` | Show the meters and run the sampler. |
+| `hud.sysmonInterval` | `2000` | Sample interval in ms (minimum 500). |
+| `hud.sysmonWarnAt` | `90` | Percentage at which a meter turns `urgent`. |
+| `hud.text.ramLabel`, `hud.text.gpuLabel` | | Meter labels. |
+
 
 ## For theme authors
 

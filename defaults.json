@@ -86,11 +86,16 @@
     "bandTop": 38,
     "clipToFrame": true,
     "identLogo": true,
+    "sysmon": true,
+    "sysmonInterval": 2000,
+    "sysmonWarnAt": 90,
     "text": {
       "tracking": "TRACKING:ACTIVE",
       "identTitle": "Heracles Mk. 1",
       "identName": "OMEGA OVERWATCH",
-      "identCode": "89 721 042"
+      "identCode": "89 721 042",
+      "ramLabel": "MEMORY ALLOCATION",
+      "gpuLabel": "GRAPHICS PROCESSOR LOAD"
     }
   }
 }

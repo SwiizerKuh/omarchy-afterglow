@@ -142,6 +142,43 @@ Item {
 
   Process { id: setupProc }
 
+  // ---- system monitor -----------------------------------------------------------
+  //
+  // bin/sysmon is started once for the whole session -- not once per screen --
+  // and streams a JSON line per sample: RAM and GPU load. It reads /proc and
+  // /sys only. Every screen's HUD draws from this one feed.
+  readonly property var hudCfg: (root.config && typeof root.config.hud === "object") ? root.config.hud : ({})
+  readonly property bool sysmonEnabled: root.plotEnabled
+    && root.hudCfg.enabled !== false && root.hudCfg.sysmon !== false
+  readonly property int sysmonInterval: Math.max(500, Number(root.hudCfg.sysmonInterval) || 2000)
+  readonly property string sysmonScript: Qt.resolvedUrl("bin/sysmon").toString().replace(/^file:\/\//, "")
+  property var sys: ({})
+  property int sysSeq: 0
+
+  Process {
+    id: sysmonProc
+    command: [root.sysmonScript, String(root.sysmonInterval)]
+    running: root.sysmonEnabled
+    stdout: SplitParser {
+      onRead: function(line) {
+        try {
+          root.sys = JSON.parse(String(line || ""))
+          root.sysSeq += 1
+        } catch (e) {
+          // a partial or malformed line: skip it, the next sample replaces it
+        }
+      }
+    }
+    // If the sampler ever exits while it should be running, bring it back.
+    onRunningChanged: if (!running && root.sysmonEnabled) sysmonRestart.restart()
+  }
+
+  Timer {
+    id: sysmonRestart
+    interval: 5000
+    onTriggered: if (root.sysmonEnabled && !sysmonProc.running) sysmonProc.running = true
+  }
+
   // A short delay, so a first load at login doesn't race the rest of the
   // session coming up.
   Timer {
@@ -155,6 +192,173 @@ Item {
 
     function setup(): void {
       root.launchSetup(false)
+    }
+  }
+
+  // -------------------------------------------------------------- SysBar
+  //
+  // One system meter: a caps label, a heavy-outlined bar filled with
+  // diagonal hatching, the percentage beside it and a dim readout below --
+  // after the status bars on the Romulus consoles.
+  //
+  // The fill is a row of blocks. When the reading changes, the leading block
+  // fades from transparent to opaque before the next one starts (and back out
+  // again when the reading falls), so the bar crawls to its value in steps.
+  // Once settled, the last block re-fills on every new sample, which is the
+  // bar visibly taking a reading. Driven by the plot's shared ~10Hz clock.
+  component SysBar: Item {
+    id: bar
+
+    property var hud: null
+    property var clock: null
+    property string label: ""
+    property string detail: ""
+    property real value: -1          // percent; < 0 means no data
+    property int seq: 0              // bumps on every sample
+    property int blocks: 25
+    property real warnAt: 90
+    property real barWidth: 240
+    property real barHeight: 18
+
+    readonly property bool hasData: bar.value >= 0
+    readonly property int target: bar.hasData
+      ? Math.max(0, Math.min(bar.blocks, Math.round(bar.value / 100 * bar.blocks))) : 0
+    readonly property color tone: bar.hasData && bar.value >= bar.warnAt
+      ? (bar.hud ? bar.hud.fault : "#c2233c")
+      : (bar.hud ? bar.hud.inkColor : "#ffffff")
+    readonly property string mono: bar.hud ? bar.hud.mono : "monospace"
+
+    // Animation state, advanced one step per clock tick.
+    property int filled: 0       // blocks fully lit
+    property real grow: 0        // opacity of block `filled` while filling up
+    property real shrink: 0      // how far block `filled - 1` has faded while emptying
+    property real refill: 1      // opacity of the last block while re-sampling
+
+    function step() {
+      if (bar.filled < bar.target) {
+        bar.shrink = 0
+        bar.grow = Math.min(1, bar.grow + 0.25)
+        if (bar.grow >= 1) { bar.filled += 1; bar.grow = 0; bar.refill = 1 }
+      } else if (bar.filled > bar.target) {
+        bar.grow = 0
+        bar.shrink = Math.min(1, bar.shrink + 0.25)
+        if (bar.shrink >= 1) { bar.filled -= 1; bar.shrink = 0; bar.refill = 1 }
+      } else if (bar.refill < 1) {
+        bar.refill = Math.min(1, bar.refill + 0.2)
+      }
+    }
+
+    onSeqChanged: if (bar.filled === bar.target && bar.filled > 0) bar.refill = 0.2
+
+    function blockOpacity(i) {
+      if (i < bar.filled - 1) return 1
+      if (i === bar.filled - 1) {
+        if (bar.filled > bar.target) return 1 - bar.shrink
+        return bar.filled === bar.target ? bar.refill : 1
+      }
+      if (i === bar.filled && bar.filled < bar.target) return bar.grow
+      return 0
+    }
+
+    Connections {
+      target: bar.clock
+      enabled: bar.clock !== null
+      function onStepped(dt) { bar.step() }
+    }
+
+    readonly property real innerX: 4
+    readonly property real innerY: 4
+    readonly property real innerW: bar.barWidth - 8
+    readonly property real innerH: bar.barHeight - 8
+    readonly property real blockW: bar.innerW / bar.blocks
+
+    // Hatching for the whole bar, sliced by each block so the stripes run
+    // on unbroken across block boundaries.
+    readonly property string hatchPath: {
+      var out = []
+      var h = bar.innerH
+      for (var x = -h; x < bar.innerW + h; x += 5) {
+        out.push("M" + x.toFixed(1) + " " + h.toFixed(1) + "L" + (x + h).toFixed(1) + " 0")
+      }
+      return out.join(" ")
+    }
+
+    width: bar.barWidth + 76
+    height: 16 + bar.barHeight + 18
+
+    Text {
+      x: 0; y: 0
+      text: bar.label
+      color: bar.tone
+      opacity: 0.9
+      font.family: bar.mono
+      font.pixelSize: 10
+      font.letterSpacing: 2
+      font.bold: true
+      renderType: Text.NativeRendering
+    }
+
+    Rectangle {
+      id: frame
+      x: 0; y: 15
+      width: bar.barWidth
+      height: bar.barHeight
+      color: "transparent"
+      border.width: 2
+      border.color: bar.tone
+      antialiasing: false
+
+      Repeater {
+        model: bar.blocks
+        delegate: Item {
+          id: block
+          required property int index
+          x: bar.innerX + Math.round(block.index * bar.blockW)
+          y: bar.innerY
+          width: Math.round((block.index + 1) * bar.blockW) - Math.round(block.index * bar.blockW)
+          height: bar.innerH
+          clip: true
+          opacity: bar.blockOpacity(block.index)
+          visible: block.opacity > 0
+
+          Shape {
+            x: -Math.round(block.index * bar.blockW)
+            width: bar.innerW
+            height: bar.innerH
+            asynchronous: false
+            ShapePath {
+              strokeColor: bar.tone
+              strokeWidth: 1.6
+              fillColor: "transparent"
+              capStyle: ShapePath.FlatCap
+              PathSvg { path: bar.hatchPath }
+            }
+          }
+        }
+      }
+    }
+
+    Text {
+      x: bar.barWidth + 10
+      y: frame.y + Math.round((bar.barHeight - implicitHeight) / 2)
+      text: bar.hasData ? Math.round(bar.value) + "%" : "--%"
+      color: bar.tone
+      font.family: bar.mono
+      font.pixelSize: 18
+      font.bold: true
+      renderType: Text.NativeRendering
+    }
+
+    Text {
+      x: 2
+      y: frame.y + bar.barHeight + 4
+      text: bar.detail
+      color: bar.tone
+      opacity: 0.5
+      font.family: bar.mono
+      font.pixelSize: 9
+      font.letterSpacing: 2
+      renderType: Text.NativeRendering
     }
   }
 
@@ -992,6 +1196,44 @@ Item {
       }
     }
 
+    // System meters: RAM over GPU, top-left of the field, aligned with the
+    // telemetry column below them.
+    readonly property var sys: hud.host && hud.host.sys ? hud.host.sys : ({})
+    function sysNum(v) { return (typeof v === "number" && isFinite(v)) ? v : -1 }
+    function hudLabel(key, fallback) { return hud.host ? hud.host.hudText(key, fallback) : fallback }
+    readonly property real meterX: Math.round(hud.w(hud.tl.x + 12, hud.cTL.y + 30).x + 24)
+    readonly property real meterY: Math.round(hud.cTL.y + 22)
+
+    SysBar {
+      visible: hud.hf("sysmon", true)
+      x: hud.meterX
+      y: hud.meterY
+      hud: hud
+      clock: hud.host
+      warnAt: hud.hn("sysmonWarnAt", 90)
+      label: hud.hudLabel("ramLabel", "MEMORY ALLOCATION")
+      value: hud.sysNum(hud.sys.ram)
+      seq: hud.host ? hud.host.sysSeq : 0
+      detail: hud.sysNum(hud.sys.ramTotal) > 0
+        ? "USED " + hud.sys.ramUsed.toFixed(1) + "G  ·  TOTAL " + hud.sys.ramTotal.toFixed(1) + "G"
+        : "AWAITING TELEMETRY"
+    }
+
+    SysBar {
+      visible: hud.hf("sysmon", true)
+      x: hud.meterX
+      y: hud.meterY + 58
+      hud: hud
+      clock: hud.host
+      warnAt: hud.hn("sysmonWarnAt", 90)
+      label: hud.hudLabel("gpuLabel", "GRAPHICS PROCESSOR LOAD")
+      value: hud.sysNum(hud.sys.gpu)
+      seq: hud.host ? hud.host.sysSeq : 0
+      detail: hud.sys.gpuSource === "none" || hud.sys.gpuSource === undefined
+        ? (hud.sys.gpuSource === "none" ? "NO GPU TELEMETRY" : "AWAITING TELEMETRY")
+        : String(hud.sys.gpuName || "").toUpperCase() + "  ·  " + String(hud.sys.gpuSource).toUpperCase()
+    }
+
     // Telemetry columns down the left-hand side.
     Repeater {
       model: hud.hf("telemetry", true) ? 9 : 0
@@ -1098,6 +1340,9 @@ Item {
 
     property bool active: false
     property var cfg: ({})
+    // Latest system sample from the service-level monitor (bin/sysmon).
+    property var sys: ({})
+    property int sysSeq: 0
 
     // ---- theme ----------------------------------------------------------------
     //
@@ -1988,6 +2233,8 @@ Item {
         anchors.fill: parent
         active: root.plotEnabled
         cfg: root.config
+        sys: root.sys
+        sysSeq: root.sysSeq
       }
     }
   }

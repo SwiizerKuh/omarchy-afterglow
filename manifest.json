@@ -2,11 +2,13 @@
   "schemaVersion": 1,
   "id": "io.github.swiizerkuh.afterglow",
   "name": "Afterglow",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "SwiizerKuh",
   "license": "MIT",
-  "description": "A live cassette-futurist trajectory plot on your desktop: a grid that spacecraft trails cross and fade from, an orbital plot, a radar scope and an instrument HUD, bent through a CRT shader. Follows your Omarchy theme.",
-  "kinds": ["service"],
+  "description": "A live cassette-futurist trajectory plot on your desktop: a grid that spacecraft trails cross and fade from, an orbital plot, a radar scope, live RAM and GPU meters and an instrument HUD, bent through a CRT shader. Follows your Omarchy theme.",
+  "kinds": [
+    "service"
+  ],
   "entryPoints": {
     "service": "Service.qml"
   }
