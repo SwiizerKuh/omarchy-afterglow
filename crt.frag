@@ -2,9 +2,14 @@
 // Cassette Futurism CRT pass.
 //
 // Everything the plot draws -- grid, trails, HUD, text -- is rendered into one
-// texture, then pushed through this: barrel distortion, scanlines that follow
-// the curve of the tube, an optional shadow mask, edge vignette, and a little
-// chromatic fringing that grows toward the edges as it does on real glass.
+// texture, then pushed through this: barrel distortion, phosphor glow,
+// scanlines that follow the curve of the tube, an optional shadow mask, edge
+// vignette, and a little chromatic fringing that grows toward the edges as it
+// does on real glass.
+//
+// The glow reads the source texture's mipmaps -- copies the GPU pre-shrinks
+// when the texture is built -- so a soft blur costs two texture reads here
+// instead of a separate offscreen buffer and several full-screen blur passes.
 //
 // Rebuild after editing:
 //   /usr/lib/qt6/bin/qsb --glsl "100 es,120,150" --hlsl 50 --msl 12 -o crt.frag.qsb crt.frag
@@ -23,16 +28,22 @@ layout(std140, binding = 0) uniform buf {
     float vignetteSpread; // fraction of the screen the falloff covers
     float aberration;     // logical px of R/B split at the very edge
     vec2 resolution;      // item size in logical px
+    float glowStrength;   // 0 = no glow
+    float glowLod;        // mip level to read the glow from: higher = wider
+    float glowColorize;   // 0 = glow in the source's colours, 1 = fully tinted
+    vec4 glowTint;
 };
 
 layout(binding = 1) uniform sampler2D source;
 
 // Output -> source. The plot convention pushes content OUTWARD by
 // (1 + k r^2), so to find what lands on an output pixel we invert that,
-// by fixed-point iteration; four rounds is plenty at these strengths.
+// by fixed-point iteration. Each round shrinks the error by a factor of
+// about the curvature, so at the default 0.042 two rounds already land well
+// under a hundredth of a pixel; three covers the strongest settings.
 vec2 unwarp(vec2 o) {
     vec2 n = o;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         n = o / (1.0 + curvature * dot(n, n));
     }
     return n;
@@ -48,26 +59,49 @@ void main() {
         return;
     }
 
-    // Radial R/B split, zero at the centre.
-    vec2 split = s * aberration / resolution;
     vec4 c = texture(source, uv);
-    c.r = texture(source, uv + split).r;
-    c.b = texture(source, uv - split).b;
+
+    // Radial R/B split, zero at the centre. Skipped outright when off.
+    if (aberration > 0.0) {
+        vec2 split = s * aberration / resolution;
+        c.r = texture(source, uv + split).r;
+        c.b = texture(source, uv - split).b;
+    }
+
+    // Phosphor glow: two neighbouring mip levels averaged, warmed toward the
+    // tint, added as light. Against a black tube that reads as bloom.
+    if (glowStrength > 0.0) {
+        vec4 g = 0.5 * (textureLod(source, uv, glowLod) + textureLod(source, uv, glowLod + 1.0));
+        float l = dot(g.rgb, vec3(0.299, 0.587, 0.114));
+        vec3 tinted = mix(g.rgb, l * glowTint.rgb, glowColorize);
+        c.rgb += tinted * glowStrength;
+        c.a = max(c.a, g.a * glowStrength);
+        // Stay a valid premultiplied colour: alpha covers the brightest channel.
+        c.a = min(1.0, max(c.a, max(c.r, max(c.g, c.b))));
+        c.rgb = min(c.rgb, vec3(c.a));
+    }
 
     // Scanlines in SOURCE space, so they bend with the tube. A narrowed
     // cosine rather than a hard 1px step: a hard edge resampled through the
     // warp aliases into moire bands.
+    // Each pattern is only computed when it is switched on.
     float PI2 = 6.2831853;
-    float sy = uv.y * resolution.y;
-    float scan = smoothstep(0.35, 1.0, 0.5 + 0.5 * cos(PI2 * sy / scanPitch));
-    float sx = uv.x * resolution.x;
-    float mask = smoothstep(0.35, 1.0, 0.5 + 0.5 * cos(PI2 * sx / scanPitch));
-    float lum = (1.0 - scanAlpha * scan) * (1.0 - maskAlpha * mask);
+    float lum = 1.0;
+    if (scanAlpha > 0.0) {
+        float scan = smoothstep(0.35, 1.0, 0.5 + 0.5 * cos(PI2 * uv.y * resolution.y / scanPitch));
+        lum *= 1.0 - scanAlpha * scan;
+    }
+    if (maskAlpha > 0.0) {
+        float mask = smoothstep(0.35, 1.0, 0.5 + 0.5 * cos(PI2 * uv.x * resolution.x / scanPitch));
+        lum *= 1.0 - maskAlpha * mask;
+    }
 
     // Edge falloff, compounding in the corners like a tube does.
-    vec2 e = min(uv, 1.0 - uv);
-    float v = smoothstep(0.0, vignetteSpread * 0.8, e.x) * smoothstep(0.0, vignetteSpread, e.y);
-    lum *= mix(1.0 - vignetteAlpha, 1.0, v);
+    if (vignetteAlpha > 0.0) {
+        vec2 e = min(uv, 1.0 - uv);
+        float v = smoothstep(0.0, vignetteSpread * 0.8, e.x) * smoothstep(0.0, vignetteSpread, e.y);
+        lum *= mix(1.0 - vignetteAlpha, 1.0, v);
+    }
 
     // Premultiplied: scale the whole pixel so it darkens over the black
     // ground instead of turning translucent.

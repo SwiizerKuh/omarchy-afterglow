@@ -20,6 +20,7 @@ pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Shapes
@@ -67,7 +68,34 @@ Item {
     return out
   }
 
-  readonly property var config: root.merge(root.merge(root.defaultsCfg, root.themeCfg), root.userCfg)
+  readonly property var baseConfig: root.merge(root.merge(root.defaultsCfg, root.themeCfg), root.userCfg)
+
+  // On battery, the `battery` block (defaults.json: a slower clock and slower
+  // sampling) is merged over everything else. Machines without a battery
+  // never see it.
+  property bool onBattery: false
+  readonly property var config: root.onBattery && root.baseConfig.battery
+    && typeof root.baseConfig.battery === "object"
+    ? root.merge(root.baseConfig, root.baseConfig.battery)
+    : root.baseConfig
+  readonly property bool pauseWhenCovered: root.config.pauseWhenFullscreen !== false
+
+  // Find the mains adapter once; then poll its `online` file (sysfs files
+  // can't be watched). Desktops have no adapter and stay on mains settings.
+  property string acOnlinePath: ""
+  Process {
+    running: true
+    command: ["bash", "-c",
+      'for d in /sys/class/power_supply/*; do [ "$(cat "$d/type" 2>/dev/null)" = Mains ] && { echo "$d/online"; exit; }; done']
+    stdout: SplitParser { onRead: function(line) { root.acOnlinePath = String(line || "").trim() } }
+  }
+  FileView {
+    id: acFile
+    path: root.acOnlinePath
+    printErrors: false
+    onLoaded: root.onBattery = String(text() || "").trim() === "0"
+    onLoadFailed: root.onBattery = false
+  }
   readonly property bool plotEnabled: root.config.enabled !== false
 
   FileView {
@@ -113,6 +141,7 @@ Item {
     repeat: true
     running: true
     onTriggered: {
+      if (root.acOnlinePath) acFile.reload()
       themeFile.reload()
       userFile.reload()
     }
@@ -154,6 +183,14 @@ Item {
   readonly property string sysmonScript: Qt.resolvedUrl("bin/sysmon").toString().replace(/^file:\/\//, "")
   property var sys: ({})
   property int sysSeq: 0
+
+  // A running process keeps the command it was started with, so a new
+  // interval (e.g. switching to the battery profile) means a restart.
+  onSysmonIntervalChanged: {
+    if (!sysmonProc.running) return
+    sysmonProc.running = false
+    Qt.callLater(function() { sysmonProc.running = root.sysmonEnabled })
+  }
 
   Process {
     id: sysmonProc
@@ -1198,7 +1235,7 @@ Item {
 
     // System meters: RAM over GPU, top-left of the field, aligned with the
     // telemetry column below them.
-    readonly property var sys: hud.host && hud.host.sys ? hud.host.sys : ({})
+    readonly property var sys: hud.host && hud.host.sysShown ? hud.host.sysShown : ({})
     function sysNum(v) { return (typeof v === "number" && isFinite(v)) ? v : -1 }
     function hudLabel(key, fallback) { return hud.host ? hud.host.hudText(key, fallback) : fallback }
     readonly property real meterX: Math.round(hud.w(hud.tl.x + 12, hud.cTL.y + 30).x + 24)
@@ -1213,7 +1250,7 @@ Item {
       warnAt: hud.hn("sysmonWarnAt", 90)
       label: hud.hudLabel("ramLabel", "MEMORY ALLOCATION")
       value: hud.sysNum(hud.sys.ram)
-      seq: hud.host ? hud.host.sysSeq : 0
+      seq: hud.host ? hud.host.sysSeqShown : 0
       detail: hud.sysNum(hud.sys.ramTotal) > 0
         ? "USED " + hud.sys.ramUsed.toFixed(1) + "G  ·  TOTAL " + hud.sys.ramTotal.toFixed(1) + "G"
         : "AWAITING TELEMETRY"
@@ -1228,7 +1265,7 @@ Item {
       warnAt: hud.hn("sysmonWarnAt", 90)
       label: hud.hudLabel("gpuLabel", "GRAPHICS PROCESSOR LOAD")
       value: hud.sysNum(hud.sys.gpu)
-      seq: hud.host ? hud.host.sysSeq : 0
+      seq: hud.host ? hud.host.sysSeqShown : 0
       detail: hud.sys.gpuSource === "none" || hud.sys.gpuSource === undefined
         ? (hud.sys.gpuSource === "none" ? "NO GPU TELEMETRY" : "AWAITING TELEMETRY")
         : String(hud.sys.gpuName || "").toUpperCase() + "  ·  " + String(hud.sys.gpuSource).toUpperCase()
@@ -1339,10 +1376,25 @@ Item {
     id: fpl
 
     property bool active: false
+    // Set while nothing of the plot can be seen (a fullscreen window over this
+    // screen). The clock stops, so no frames are drawn at all; the last frame
+    // simply stays put underneath.
+    property bool paused: false
     property var cfg: ({})
     // Latest system sample from the service-level monitor (bin/sysmon).
     property var sys: ({})
     property int sysSeq: 0
+    // What the meters draw: the live feed, held still while paused so a new
+    // reading can't trigger a redraw nobody can see.
+    property var sysShown: ({})
+    property int sysSeqShown: 0
+    function syncSys() {
+      if (fpl.paused) return
+      fpl.sysShown = fpl.sys
+      fpl.sysSeqShown = fpl.sysSeq
+    }
+    onSysChanged: fpl.syncSys()
+    onPausedChanged: fpl.syncSys()
 
     // ---- theme ----------------------------------------------------------------
     //
@@ -1474,9 +1526,11 @@ Item {
     // point come from", which is exactly what placing the HUD needs.
     readonly property bool shaderCrt: fpl.crt && fpl.crtFlag("shader", true)
     readonly property real geomCurvature: fpl.shaderCrt ? 0 : fpl.curvature
-    // Source is rendered above native resolution so resampling through the
-    // warp stays crisp rather than smearing 1px rules.
-    readonly property real supersample: Math.max(1, Math.min(2, fpl.crtNum("supersample", 1.5)))
+    // Render scale of the tube before the warp. 1.0 is native resolution and
+    // the default: every step above it multiplies the pixels drawn per frame
+    // (1.5 is 2.25x), which was the single largest GPU cost measured. Raise it
+    // only for the last bit of crispness on a desktop that is plugged in.
+    readonly property real supersample: Math.max(1, Math.min(2, fpl.crtNum("supersample", 1.0)))
     readonly property real aberration: Math.max(0, fpl.crtNum("aberration", 0.8))
     readonly property bool showScanlines: fpl.crt && fpl.crtFlag("scanlines", true)
     readonly property int scanPitch: Math.max(2, Math.round(fpl.crtNum("scanlinePitch", 3)))
@@ -1503,7 +1557,7 @@ Item {
     Timer {
       interval: Math.max(40, Math.round(fpl.num("tickMs", 100)))
       repeat: true
-      running: fpl.active && fpl.width > 0 && fpl.height > 0
+      running: fpl.active && !fpl.paused && fpl.width > 0 && fpl.height > 0
       onTriggered: {
         fpl.clock += 1
         fpl.stepped(interval)
@@ -1759,7 +1813,9 @@ Item {
     Item {
       id: plot
       anchors.fill: parent
-      layer.enabled: fpl.showHalation
+      // An offscreen copy of the plot is only needed to feed the fallback
+      // blur below; with the CRT shader on, glow comes from mipmaps instead.
+      layer.enabled: fpl.showHalation && !fpl.shaderCrt
       layer.smooth: true
 
       HudLayer {
@@ -2158,10 +2214,13 @@ Item {
     // Phosphor bleed: a blurred copy of the bright plot laid back over itself.
     // Against a black tube, alpha compositing reads as additive, so this glows
     // rather than fogs. Warmed slightly, the way an aging phosphor does.
+    // Fallback glow, used only when the CRT shader is switched off. With the
+    // shader on, glow is two mipmap reads inside crt.frag: no extra buffer, no
+    // multi-pass blur -- measured as the second-largest GPU cost before.
     MultiEffect {
       anchors.fill: plot
       source: plot
-      visible: fpl.showHalation
+      visible: fpl.showHalation && !fpl.shaderCrt
       blurEnabled: true
       blur: 1.0
       blurMax: Math.round(fpl.halationRadius)
@@ -2181,6 +2240,8 @@ Item {
     // ---- CRT pass -----------------------------------------------------------
     ShaderEffectSource {
       id: tubeTexture
+      // Mip levels feed the shader's glow; built only when glow is on.
+      mipmap: fpl.showHalation
       sourceItem: tube
       hideSource: fpl.shaderCrt
       live: true
@@ -2204,6 +2265,12 @@ Item {
       property real vignetteSpread: fpl.vignetteSpread
       property real aberration: fpl.aberration
       property size resolution: Qt.size(fpl.width, fpl.height)
+      property real glowStrength: fpl.showHalation ? fpl.halationStrength * 0.9 : 0
+      // halationRadius in px -> mip level: each level halves the resolution.
+      property real glowLod: Math.max(1, Math.min(7,
+        Math.log(Math.max(2, fpl.halationRadius * Screen.devicePixelRatio * fpl.supersample) / 3) / Math.LN2))
+      property real glowColorize: fpl.halationColorize
+      property color glowTint: fpl.halationTint
     }
   }
 
@@ -2213,6 +2280,12 @@ Item {
     PanelWindow {
       id: panel
       required property var modelData
+
+      // The Hyprland monitor this panel sits on, and whether its active
+      // workspace is fullscreen -- then nothing of the plot shows.
+      readonly property var hyprMonitor: Hyprland.monitorFor(panel.screen)
+      readonly property bool covered: !!(panel.hyprMonitor && panel.hyprMonitor.activeWorkspace
+        && panel.hyprMonitor.activeWorkspace.hasFullscreen)
 
       screen: modelData
       visible: root.plotEnabled
@@ -2233,6 +2306,7 @@ Item {
         anchors.fill: parent
         active: root.plotEnabled
         cfg: root.config
+        paused: root.pauseWhenCovered && panel.covered
         sys: root.sys
         sysSeq: root.sysSeq
       }

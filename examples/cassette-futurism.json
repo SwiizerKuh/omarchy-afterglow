@@ -34,7 +34,7 @@
   "crt": {
     "enabled": true,
     "shader": true,
-    "supersample": 1.5,
+    "supersample": 1.0,
     "curvature": 0.042,
     "scanlines": true,
     "scanlinePitch": 3,

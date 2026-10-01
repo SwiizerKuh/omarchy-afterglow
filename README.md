@@ -158,6 +158,8 @@ smudge on a light ground. Set `crt.halationOnLight` to `true` to keep it.
 | `backdrop` | `0.55` | Opacity of the theme-background wash over your wallpaper. |
 | `paths` | `3` | Concurrent trajectories (max 8). |
 | `tickMs` | `100` | Clock step. Motion is deliberately stepped (see below). |
+| `pauseWhenFullscreen` | `true` | Stop drawing while a fullscreen window covers the screen. |
+| `battery` | | Settings merged over everything else while on battery (see Performance). |
 | `cell`, `gridMajorEvery`, `gridAlpha`, `gridMajorAlpha` | | The grid. |
 | `raster`, `dotSize`, `dotSpacing` | | Trail dots and the pixel grid they snap to. |
 | `crossMin/Max`, `holdMin/Max`, `fadeMin/Max`, `gapMin/Max` | | Trajectory timing in ms. |
@@ -170,10 +172,10 @@ smudge on a light ground. Set `crt.halationOnLight` to `true` to keep it.
 | `curvature` | `0.042` | Barrel strength, 0–0.4. |
 | `scanlines`, `scanlinePitch`, `scanlineAlpha` | on, 3, 0.22 | Scanlines, which bend with the tube. |
 | `mask`, `maskAlpha` | off | Vertical shadow mask. |
-| `halation`, `halationStrength`, `halationRadius`, `halationTint`, `halationColorize` | on | Phosphor glow. |
+| `halation`, `halationStrength`, `halationRadius`, `halationTint`, `halationColorize` | on (off on battery) | Phosphor glow, read from the plot's mipmaps inside the CRT shader. |
 | `vignette`, `vignetteAlpha`, `vignetteSpread` | on | Edge falloff. |
 | `aberration` | `0.8` | R/B fringing at the edges, in px. |
-| `supersample` | `1.5` | Render scale before the warp, which keeps 1px lines crisp. |
+| `supersample` | `1.0` | Render scale before the warp. Higher is marginally crisper and costs that factor squared in GPU work (1.5 = 2.25×). |
 
 ### `hud`
 
@@ -241,28 +243,43 @@ accents, and no backdrop.
 
 ## Performance
 
-Measured on a 2256×1504 laptop panel (Intel, Omarchy Quattro), as CPU of the
-shell process with the plugin enabled versus disabled:
+Afterglow is built to be cheap enough to leave running on a laptop. Measured
+on a 2256×1504 Surface laptop with Intel Iris Xe graphics. The figures are the
+shell's own GPU time, read from the kernel's per-process accounting so other
+apps don't skew them:
 
-| Configuration | Shell CPU |
-|---|---|
-| Plugin disabled | ~1% |
-| Defaults | ~10% of one core |
-| `"tickMs": 200` | ~6% |
-| Battery saver (below) | ~4% |
+| Situation | Shell GPU time | Shell CPU |
+|---|---|---|
+| Plugin disabled | 0% | <1% |
+| On mains | ~6% | ~4% |
+| **On battery** (automatic) | **~2%** | ~2% |
+| Fullscreen window over the desktop | **0%** | ~0% |
 
-Nearly all of the cost is the clock rate: each step re-renders the plot and
-runs the CRT pass. For a laptop on battery:
+How it gets there:
 
-```json
-{ "tickMs": 250, "paths": 2, "crt": { "halation": false, "supersample": 1.0 } }
-```
+- **Few frames.** One shared clock drives everything at 10 steps a second,
+  and 5 on battery. The plot only redraws on a step, then sits idle. The
+  stepped motion is deliberate; it suits a radar plot better than smooth
+  motion does.
+- **Nothing drawn when nothing shows.** While a fullscreen window covers a
+  screen (a video, a game), that screen's plot stops entirely, meters
+  included, and picks up again the moment the window goes.
+- **Battery profile.** On battery, the `battery` block in `defaults.json` is
+  merged over your settings: 5 steps a second, no phosphor glow, and meters
+  sampled every 4 s. It switches within ~15 s of plugging or unplugging.
+  Override it with your own `battery` block, or set `"battery": {}` to keep
+  full effects on battery.
+- **Cheap CRT.** The plot renders at native resolution and goes through a
+  single shader pass. The glow comes from mipmaps the GPU builds for that
+  same texture, not a separate blur. Effects that are switched off are
+  skipped in the shader, not merely zeroed.
+- **Static artwork is cached.** Grid, frame, rings and the point cloud are
+  drawn once and reused as textures.
 
-Motion is stepped on purpose. One shared clock drives everything, so the
-scene sits idle between steps instead of redrawing at 60fps, and discrete
-jumps suit a radar plot better than smooth motion. Static artwork (grid,
-frame, rings, point cloud) is drawn once and reused, and the CRT pass runs on
-the GPU.
+Nearly all of the cost is per frame, not per element: hiding trails or the
+grid saves nothing measurable, while halving the frame rate halves it. So
+`tickMs` is the one dial that matters. Raising it slows the motion, and every
+doubling roughly halves the cost.
 
 ## Updating
 

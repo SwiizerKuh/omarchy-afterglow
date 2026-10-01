@@ -3,6 +3,7 @@
   "backdrop": 0.55,
   "paths": 3,
   "tickMs": 100,
+  "pauseWhenFullscreen": true,
   "grid": true,
   "cell": 48,
   "gridMajorEvery": 4,
@@ -33,7 +34,7 @@
   "crt": {
     "enabled": true,
     "shader": true,
-    "supersample": 1.5,
+    "supersample": 1.0,
     "curvature": 0.042,
     "scanlines": true,
     "scanlinePitch": 3,
@@ -96,6 +97,16 @@
       "identCode": "89 721 042",
       "ramLabel": "MEMORY ALLOCATION",
       "gpuLabel": "GRAPHICS PROCESSOR LOAD"
+    }
+  },
+  "battery": {
+    "_": "Merged over everything else while running on battery: half the frame rate, no glow, slower meters. Measured at about a quarter of the GPU cost of the mains settings.",
+    "tickMs": 200,
+    "crt": {
+      "halation": false
+    },
+    "hud": {
+      "sysmonInterval": 4000
     }
   }
 }
