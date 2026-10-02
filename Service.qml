@@ -265,6 +265,14 @@ Item {
       : (bar.hud ? bar.hud.inkColor : "#ffffff")
     readonly property string mono: bar.hud ? bar.hud.mono : "monospace"
 
+    // Same brightness scale as the rest of the HUD (hud.alpha x a multiplier),
+    // so the meters sit with the frame and rings instead of glaring over them.
+    // The warning colour goes through it too: it changes hue, not brightness.
+    readonly property real alpha: bar.hud ? bar.hud.alpha : 0.34
+    function ink(k) {
+      return Qt.rgba(bar.tone.r, bar.tone.g, bar.tone.b, Math.max(0, Math.min(1, bar.alpha * k)))
+    }
+
     // Animation state, advanced one step per clock tick.
     property int filled: 0       // blocks fully lit
     property real grow: 0        // opacity of block `filled` while filling up
@@ -326,8 +334,9 @@ Item {
     Text {
       x: 0; y: 0
       text: bar.label
-      color: bar.tone
-      opacity: 0.9
+      // Bold caps carry more light than thin rules at the same alpha, so the
+      // text sits a step lower than its nominal match to read as equal.
+      color: bar.ink(2.0)
       font.family: bar.mono
       font.pixelSize: 10
       font.letterSpacing: 2
@@ -342,7 +351,7 @@ Item {
       height: bar.barHeight
       color: "transparent"
       border.width: 2
-      border.color: bar.tone
+      border.color: bar.ink(1.7)
       antialiasing: false
 
       Repeater {
@@ -364,8 +373,8 @@ Item {
             height: bar.innerH
             asynchronous: false
             ShapePath {
-              strokeColor: bar.tone
-              strokeWidth: 1.6
+              strokeColor: bar.ink(1.6)
+              strokeWidth: 1.2
               fillColor: "transparent"
               capStyle: ShapePath.FlatCap
               PathSvg { path: bar.hatchPath }
@@ -379,7 +388,7 @@ Item {
       x: bar.barWidth + 10
       y: frame.y + Math.round((bar.barHeight - implicitHeight) / 2)
       text: bar.hasData ? Math.round(bar.value) + "%" : "--%"
-      color: bar.tone
+      color: bar.ink(2.0)
       font.family: bar.mono
       font.pixelSize: 18
       font.bold: true
@@ -390,8 +399,7 @@ Item {
       x: 2
       y: frame.y + bar.barHeight + 4
       text: bar.detail
-      color: bar.tone
-      opacity: 0.5
+      color: bar.ink(1.5)
       font.family: bar.mono
       font.pixelSize: 9
       font.letterSpacing: 2
